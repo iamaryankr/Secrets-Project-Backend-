@@ -1,0 +1,465 @@
+-----------------------------------index.js-------------------------------------------------------
+
+import express from "express";
+import bodyParser from "body-parser";
+import pg from "pg";
+import bcrypt from "bcrypt";
+import passport from "passport";
+import { Strategy } from "passport-local";
+import GoogleStrategy from "passport-google-oauth2";
+import session from "express-session";
+import env from "dotenv";
+
+const app = express();
+const port = 3000;
+const saltRounds = 10;
+env.config();
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: true,
+  })
+);
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.static("public"));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+const db = new pg.Client({
+  user: process.env.PG_USER,
+  host: process.env.PG_HOST,
+  database: process.env.PG_DATABASE,
+  password: process.env.PG_PASSWORD,
+  port: process.env.PG_PORT,
+});
+db.connect();
+
+app.get("/", (req, res) => {
+  res.render("home.ejs");
+});
+
+app.get("/login", (req, res) => {
+  res.render("login.ejs");
+});
+
+app.get("/register", (req, res) => {
+  res.render("register.ejs");
+});
+
+app.get("/logout", (req, res) => {
+  req.logout(function (err) {
+    if (err) {
+      return next(err);
+    }
+    res.redirect("/");
+  });
+});
+
+app.get("/secrets", async (req, res) => {
+  console.log(req.user);
+
+  ////////////////UPDATED GET SECRETS ROUTE/////////////////
+  if (req.isAuthenticated()) {
+    try {
+      const result = await db.query(
+        `SELECT secret FROM users WHERE email = $1`,
+        [req.user.email]
+      );
+      console.log(result);
+      const secret = result.rows[0].secret;
+      if (secret) {
+        res.render("secrets.ejs", { secret: secret });
+      } else {
+        res.render("secrets.ejs", { secret: "Jack Bauer is my hero." });
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  } else {
+    res.redirect("/login");
+  }
+});
+
+////////////////SUBMIT GET ROUTE/////////////////
+app.get("/submit", function (req, res) {
+  if (req.isAuthenticated()) {
+    res.render("submit.ejs");
+  } else {
+    res.redirect("/login");
+  }
+});
+
+app.get(
+  "/auth/google",
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+  })
+);
+
+app.get(
+  "/auth/google/secrets",
+  passport.authenticate("google", {
+    successRedirect: "/secrets",
+    failureRedirect: "/login",
+  })
+);
+
+app.post(
+  "/login",
+  passport.authenticate("local", {
+    successRedirect: "/secrets",
+    failureRedirect: "/login",
+  })
+);
+
+app.post("/register", async (req, res) => {
+  const email = req.body.username;
+  const password = req.body.password;
+
+  try {
+    const checkResult = await db.query("SELECT * FROM users WHERE email = $1", [
+      email,
+    ]);
+
+    if (checkResult.rows.length > 0) {
+      req.redirect("/login");
+    } else {
+      bcrypt.hash(password, saltRounds, async (err, hash) => {
+        if (err) {
+          console.error("Error hashing password:", err);
+        } else {
+          const result = await db.query(
+            "INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *",
+            [email, hash]
+          );
+          const user = result.rows[0];
+          req.login(user, (err) => {
+            console.log("success");
+            res.redirect("/secrets");
+          });
+        }
+      });
+    }
+  } catch (err) {
+    console.log(err);
+  }
+});
+
+
+////////////////SUBMIT POST ROUTE/////////////////
+app.post("/submit", async function (req, res) {
+  const submittedSecret = req.body.secret;
+  console.log(req.user);
+  try {
+    await db.query(`UPDATE users SET secret = $1 WHERE email = $2`, [
+      submittedSecret,
+      req.user.email,
+    ]);
+    res.redirect("/secrets");
+  } catch (err) {
+    console.log(err);
+  }
+});
+
+passport.use(
+  "local",
+  new Strategy(async function verify(username, password, cb) {
+    try {
+      const result = await db.query("SELECT * FROM users WHERE email = $1 ", [
+        username,
+      ]);
+      if (result.rows.length > 0) {
+        const user = result.rows[0];
+        const storedHashedPassword = user.password;
+        bcrypt.compare(password, storedHashedPassword, (err, valid) => {
+          if (err) {
+            console.error("Error comparing passwords:", err);
+            return cb(err);
+          } else {
+            if (valid) {
+              return cb(null, user);
+            } else {
+              return cb(null, false);
+            }
+          }
+        });
+      } else {
+        return cb("User not found");
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  })
+);
+
+passport.use(
+  "google",
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: "http://localhost:3000/auth/google/secrets",
+      userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo",
+    },
+    async (accessToken, refreshToken, profile, cb) => {
+      try {
+        const result = await db.query("SELECT * FROM users WHERE email = $1", [
+          profile.email,
+        ]);
+        if (result.rows.length === 0) {
+          const newUser = await db.query(
+            "INSERT INTO users (email, password) VALUES ($1, $2)",
+            [profile.email, "google"]
+          );
+          return cb(null, newUser.rows[0]);
+        } else {
+          return cb(null, result.rows[0]);
+        }
+      } catch (err) {
+        return cb(err);
+      }
+    }
+  )
+);
+passport.serializeUser((user, cb) => {
+  cb(null, user);
+});
+
+passport.deserializeUser((user, cb) => {
+  cb(null, user);
+});
+
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});
+
+
+-----------------------------------package.json-------------------------------------------------------
+
+{
+  "name": "9.0-secrets-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.3.1",
+    "ejs": "^3.1.9",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "passport": "^0.7.0",
+    "passport-google-oauth2": "^0.2.0",
+    "passport-local": "^1.0.0",
+    "pg": "^8.11.3"
+  }
+}
+
+-----------------------------------style.css-------------------------------------------------------
+
+body {
+  background-color: #E8ECEF;
+}
+
+.centered {
+    padding-top: 200px;
+    text-align: center;
+}
+
+.secret-text {
+  text-align: center;
+  font-size: 2rem;
+  color: #fff;
+  background-color: #000;
+}
+
+-----------------------------------footer.ejs-------------------------------------------------------
+
+</body>
+</html>
+
+-----------------------------------header.ejs-------------------------------------------------------
+
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+
+<head>
+  <meta charset="utf-8">
+  <title>Secrets</title>
+  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.6.3/css/all.css" integrity="sha384-UHRtZLI+pbxtHCWp1t77Bi1L4ZtiqrqD80Kn4Z8NTSRyMA2Fd33n5dQ8lWUE00s/" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.2.1/css/bootstrap.min.css" integrity="sha384-GJzZqFGwb1QTTN6wy59ffF1BuGJpLSa9DkKMp0DgiMDm4iYMj70gZWKYbI706tWS" crossorigin="anonymous">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+
+-----------------------------------home.ejs-------------------------------------------------------
+
+<%- include('partials/header') %>
+
+
+<div class="jumbotron centered">
+  <div class="container">
+    <i class="fas fa-key fa-6x"></i>
+    <h1 class="display-3">Secrets</h1>
+    <p class="lead">Don't keep your secrets, share them anonymously!</p>
+    <hr>
+    <a class="btn btn-light btn-lg" href="/register" role="button">Register</a>
+    <a class="btn btn-dark btn-lg" href="/login" role="button">Login</a>
+
+  </div>
+</div>
+
+<%- include('partials/footer') %>
+
+
+-----------------------------------login.ejs-------------------------------------------------------
+
+<%- include('partials/header') %>
+
+  <div class="container mt-5">
+    <h1>Login</h1>
+
+    <div class="row">
+      <div class="col-sm-8">
+        <div class="card">
+          <div class="card-body">
+
+            <!-- Makes POST request to /login route -->
+            <form action="/login" method="POST">
+              <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" class="form-control" name="username">
+              </div>
+              <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" class="form-control" name="password">
+              </div>
+              <button type="submit" class="btn btn-dark">Login</button>
+            </form>
+
+          </div>
+        </div>
+      </div>
+
+      <div class="col-sm-4">
+        <div class="card">
+          <div class="card-body">
+            <a class="btn btn-block" href="/auth/google" role="button">
+              <i class="fab fa-google"></i>
+              Sign In with Google
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <%- include('partials/footer') %>
+
+-----------------------------------register.ejs-------------------------------------------------------
+
+<%- include('partials/header') %>
+<div class="container mt-5">
+  <h1>Register</h1>
+
+  <div class="row">
+    <div class="col-sm-8">
+      <div class="card">
+        <div class="card-body">
+
+          <!-- Makes POST request to /register route -->
+          <form action="/register" method="POST">
+            <div class="form-group">
+              <label for="email">Email</label>
+              <input type="email" class="form-control" name="username">
+            </div>
+            <div class="form-group">
+              <label for="password">Password</label>
+              <input type="password" class="form-control" name="password">
+            </div>
+            <button type="submit" class="btn btn-dark">Register</button>
+          </form>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="col-sm-4">
+      <div class="card social-block">
+        <div class="card-body">
+          <a class="btn btn-block" href="/auth/google" role="button">
+            <i class="fab fa-google"></i>
+            Sign Up with Google
+          </a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<%- include('partials/header') %>
+
+
+-----------------------------------secrets.ejs-------------------------------------------------------
+
+<%- include('partials/header') %>
+
+  <div class="jumbotron text-center">
+    <div class="container">
+      <i class="fas fa-key fa-6x"></i>
+      <h1 class="display-3">You've Discovered My Secret!</h1>
+      <p class="secret-text">
+        <%= secret %>
+      </p>
+      <hr>
+
+      <a class="btn btn-light btn-lg" href="/logout" role="button">Log Out</a>
+      <a class="btn btn-dark btn-lg" href="/submit" role="button">Submit a Secret</a>
+    </div>
+  </div>
+
+  <%- include('partials/footer') %>
+
+-----------------------------------submit.ejs-------------------------------------------------------
+
+<%- include('partials/header') %>
+
+<div class="container">
+  <div class="jumbotron centered">
+    <i class="fas fa-key fa-6x"></i>
+    <h1 class="display-3">Secrets</h1>
+    <p class="secret-text">Don't keep your secrets, share them anonymously!</p>
+
+    <form action="/submit" method="POST">
+
+      <div class="form-group">
+        <input type="text" class="form-control text-center" name="secret" placeholder="What's your secret?">
+      </div>
+      <button type="submit" class="btn btn-dark">Submit</button>
+    </form>
+
+
+  </div>
+</div>
+<%- include('partials/footer') %>
+
+
+
+
+
+
+
+
