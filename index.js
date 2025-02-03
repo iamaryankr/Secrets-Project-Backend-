@@ -9,7 +9,8 @@ import env from "dotenv";
 import pkg from 'pg';
 const { Pool } = pkg;
 import path from "path";
-import { fileURLToPath } from "url"
+import { fileURLToPath } from "url";
+import cors from 'cors';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +30,12 @@ app.use(
     }
   })
 );
+
+app.use(cors({
+  origin: 'https://secrets-project-backend.vercel.app', // Replace with your frontend URL
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true, // Allows cookies to be sent in cross-origin requests
+}))
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
