@@ -39,20 +39,13 @@ app.use(
 );
 
 // Enable CORS for your frontend URL with credentials allowed
-app.use(
-  cors({
-    origin: "https://secrets-project-backend.vercel.app", // Replace with your frontend URL
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
-  })
-);
-// app.use((req, res, next) => {
-//   res.setHeader(
-//     "Content-Security-Policy",
-//     "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://secrets-project-backend.vercel.app;"
-//   );
-//   next();
-// });
+// app.use(
+//   cors({
+//     origin: "https://secrets-project-backend.vercel.app", // Replace with your frontend URL
+//     methods: ["GET", "POST", "PUT", "DELETE"],
+//     credentials: true,
+//   })
+// );
 
 // Parse form data
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -76,7 +69,7 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   port: process.env.DB_PORT,
   ssl:
-process.env.DB_SSL === "true"
+    process.env.DB_SSL === "true"
       ? { rejectUnauthorized: false }
       : false,
 });
