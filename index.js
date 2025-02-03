@@ -11,6 +11,7 @@ const { Pool } = pkg;
 import path from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
+import helmet from "helmet";
 
 // Determine __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -37,6 +38,14 @@ app.use(
     },
   })
 );
+app.use(helmet.contentSecurityPolicy({
+  directives: {
+    defaultSrc: ["'self'"],
+    scriptSrc: ["'self'", "'unsafe-inline'"],
+    styleSrc: ["'self'", "'unsafe-inline'"],
+    imgSrc: ["'self'"],
+  },
+}));
 
 // Enable CORS for your frontend URL with credentials allowed
 // app.use(
