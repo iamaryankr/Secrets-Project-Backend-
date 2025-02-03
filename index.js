@@ -24,6 +24,9 @@ app.use(
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
+    cookie: {
+      secure: true
+    }
   })
 );
 
@@ -209,7 +212,9 @@ passport.use(
     {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: "https://secrets-project-backend.vercel.app/auth/google/secrets",
+      callbackURL: process.env.NODE_ENV === 'production'
+      ? "https://secrets-project-backend.vercel.app/auth/google/secrets"
+      : "http://localhost:3000/auth/google/secrets" ,
       userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo",
     },
     async (accessToken, refreshToken, profile, cb) => {
