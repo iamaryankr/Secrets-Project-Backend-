@@ -46,6 +46,13 @@ app.use(
     credentials: true,
   })
 );
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://secrets-project-backend.vercel.app;"
+  );
+  next();
+});
 
 // Parse form data
 app.use(bodyParser.urlencoded({ extended: true }));
