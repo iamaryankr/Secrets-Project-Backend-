@@ -1,15 +1,21 @@
 import express from "express";
 import bodyParser from "body-parser";
-import pg from "pg";
 import bcrypt from "bcrypt";
 import passport from "passport";
 import { Strategy } from "passport-local";
 import GoogleStrategy from "passport-google-oauth2";
 import session from "express-session";
 import env from "dotenv";
+import pkg from 'pg';
+const { Pool } = pkg;
+import path from "path";
+import { fileURLToPath } from "url"
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = 3000;
+const port = 3000 || process.env.PORT;
 const saltRounds = 10;
 env.config();
 
@@ -20,20 +26,24 @@ app.use(
     saveUninitialized: true,
   })
 );
+
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static("public"));
+app.use(express.static(path.join(__dirname, "public")));
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-const db = new pg.Client({
-  user: process.env.PG_USER,
-  host: process.env.PG_HOST,
-  database: process.env.PG_DATABASE,
-  password: process.env.PG_PASSWORD,
-  port: process.env.PG_PORT,
+const pool = new Pool({
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_DATABASE,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
 });
-db.connect();
+// db.connect();
 
 app.get("/", (req, res) => {
   res.render("home.ejs");
@@ -62,7 +72,7 @@ app.get("/secrets", async (req, res) => {
   ////////////////UPDATED GET SECRETS ROUTE/////////////////
   if (req.isAuthenticated()) {
     try {
-      const result = await db.query(
+      const result = await pool.query(
         `SELECT secret FROM users WHERE email = $1`,
         [req.user.email]
       );
@@ -118,7 +128,7 @@ app.post("/register", async (req, res) => {
   const password = req.body.password;
 
   try {
-    const checkResult = await db.query("SELECT * FROM users WHERE email = $1", [
+    const checkResult = await pool.query("SELECT * FROM users WHERE email = $1", [
       email,
     ]);
 
@@ -129,7 +139,7 @@ app.post("/register", async (req, res) => {
         if (err) {
           console.error("Error hashing password:", err);
         } else {
-          const result = await db.query(
+          const result = await pool.query(
             "INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *",
             [email, hash]
           );
@@ -152,7 +162,7 @@ app.post("/submit", async function (req, res) {
   const submittedSecret = req.body.secret;
   console.log(req.user);
   try {
-    await db.query(`UPDATE users SET secret = $1 WHERE email = $2`, [
+    await pool.query(`UPDATE users SET secret = $1 WHERE email = $2`, [
       submittedSecret,
       req.user.email,
     ]);
@@ -166,7 +176,7 @@ passport.use(
   "local",
   new Strategy(async function verify(username, password, cb) {
     try {
-      const result = await db.query("SELECT * FROM users WHERE email = $1 ", [
+      const result = await pool.query("SELECT * FROM users WHERE email = $1 ", [
         username,
       ]);
       if (result.rows.length > 0) {
@@ -204,11 +214,11 @@ passport.use(
     },
     async (accessToken, refreshToken, profile, cb) => {
       try {
-        const result = await db.query("SELECT * FROM users WHERE email = $1", [
+        const result = await pool.query("SELECT * FROM users WHERE email = $1", [
           profile.email,
         ]);
         if (result.rows.length === 0) {
-          const newUser = await db.query(
+          const newUser = await pool.query(
             "INSERT INTO users (email, password) VALUES ($1, $2)",
             [profile.email, "google"]
           );
